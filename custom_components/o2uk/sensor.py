@@ -21,79 +21,62 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DEFAULT_NAME, DOMAIN
-from .coordinator import O2Allowance, O2Coordinator, O2Data
+from .coordinator import O2Coordinator
+from .parser import O2Snapshot
 
 
 @dataclass(frozen=True, kw_only=True)
 class O2SensorDescription(SensorEntityDescription):
     """Describes an O2 UK sensor."""
 
-    value_fn: Callable[[O2Data], Any]
+    value_fn: Callable[[O2Snapshot], Any]
 
 
-def _data_remaining(data: O2Data) -> float | str | None:
-    return _allowance_remaining(data.data, gigabytes=True)
+def _data_remaining(snap: O2Snapshot) -> float | None:
+    a = snap.allowances.get("data")
+    return a.remaining if a and not a.unlimited else None
 
 
-def _data_initial(data: O2Data) -> float | str | None:
-    return _allowance_initial(data.data, gigabytes=True)
+def _data_used(snap: O2Snapshot) -> float | None:
+    a = snap.allowances.get("data")
+    return a.used if a else None
 
 
-def _voice_remaining(data: O2Data) -> float | str | None:
-    return _allowance_remaining(data.voice, gigabytes=False)
+def _data_allowance(snap: O2Snapshot) -> float | None:
+    a = snap.allowances.get("data")
+    return a.initial if a and not a.unlimited else None
 
 
-def _text_remaining(data: O2Data) -> float | str | None:
-    return _allowance_remaining(data.text, gigabytes=False)
+def _voice_used(snap: O2Snapshot) -> float | None:
+    a = snap.allowances.get("voice")
+    return a.used if a else None
 
 
-def _allowance_remaining(allowance: O2Allowance | None, *, gigabytes: bool) -> float | str | None:
-    if allowance is None:
-        return None
-    if allowance.balance is None:
-        return "unlimited"
-    return allowance.balance / 1024 if gigabytes else allowance.balance
+def _voice_remaining(snap: O2Snapshot) -> float | None:
+    a = snap.allowances.get("voice")
+    return a.remaining if a and not a.unlimited else None
 
 
-def _allowance_initial(allowance: O2Allowance | None, *, gigabytes: bool) -> float | str | None:
-    if allowance is None or allowance.initial is None:
-        return None
-    return allowance.initial / 1024 if gigabytes else allowance.initial
+def _sms_used(snap: O2Snapshot) -> float | None:
+    a = snap.allowances.get("sms")
+    return a.used if a else None
 
 
-def _data_used(data: O2Data) -> float | None:
-    if data.data is None or data.data.balance is None or data.data.initial is None:
-        return None
-    used_mb = max(data.data.initial - data.data.balance, 0.0)
-    return used_mb / 1024
+def _sms_remaining(snap: O2Snapshot) -> float | None:
+    a = snap.allowances.get("sms")
+    return a.remaining if a and not a.unlimited else None
 
 
-def _voice_used(data: O2Data) -> float | None:
-    return _used_minutes_or_texts(data.voice)
+def _reset_date(snap: O2Snapshot) -> datetime | None:
+    return snap.reset_date
 
 
-def _text_used(data: O2Data) -> float | None:
-    return _used_minutes_or_texts(data.text)
+def _spend_cap(snap: O2Snapshot) -> float | None:
+    return snap.spend_cap
 
 
-def _used_minutes_or_texts(allowance: O2Allowance | None) -> float | None:
-    if allowance is None or allowance.balance is None or allowance.initial is None:
-        return None
-    return max(allowance.initial - allowance.balance, 0.0)
-
-
-def _reset_date(data: O2Data) -> datetime | None:
-    if data.data is None:
-        return None
-    return data.data.expires
-
-
-def _bill_amount(data: O2Data) -> float | None:
-    return data.latest_bill_amount
-
-
-def _bill_date(data: O2Data) -> datetime | None:
-    return data.latest_bill_date
+def _monthly_charge(snap: O2Snapshot) -> float | None:
+    return snap.tariff_monthly_charge
 
 
 SENSORS: tuple[O2SensorDescription, ...] = (
@@ -124,15 +107,7 @@ SENSORS: tuple[O2SensorDescription, ...] = (
         native_unit_of_measurement=UnitOfInformation.GIGABYTES,
         device_class=SensorDeviceClass.DATA_SIZE,
         suggested_display_precision=2,
-        value_fn=_data_initial,
-    ),
-    O2SensorDescription(
-        key="minutes_remaining",
-        translation_key="minutes_remaining",
-        icon="mdi:phone",
-        native_unit_of_measurement="min",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=_voice_remaining,
+        value_fn=_data_allowance,
     ),
     O2SensorDescription(
         key="minutes_used",
@@ -143,12 +118,12 @@ SENSORS: tuple[O2SensorDescription, ...] = (
         value_fn=_voice_used,
     ),
     O2SensorDescription(
-        key="texts_remaining",
-        translation_key="texts_remaining",
-        icon="mdi:message",
-        native_unit_of_measurement="messages",
+        key="minutes_remaining",
+        translation_key="minutes_remaining",
+        icon="mdi:phone",
+        native_unit_of_measurement="min",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=_text_remaining,
+        value_fn=_voice_remaining,
     ),
     O2SensorDescription(
         key="texts_used",
@@ -156,7 +131,15 @@ SENSORS: tuple[O2SensorDescription, ...] = (
         icon="mdi:message-arrow-right",
         native_unit_of_measurement="messages",
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=_text_used,
+        value_fn=_sms_used,
+    ),
+    O2SensorDescription(
+        key="texts_remaining",
+        translation_key="texts_remaining",
+        icon="mdi:message",
+        native_unit_of_measurement="messages",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_sms_remaining,
     ),
     O2SensorDescription(
         key="allowance_reset",
@@ -166,20 +149,22 @@ SENSORS: tuple[O2SensorDescription, ...] = (
         value_fn=_reset_date,
     ),
     O2SensorDescription(
-        key="latest_bill_amount",
-        translation_key="latest_bill_amount",
-        icon="mdi:cash",
+        key="spend_cap",
+        translation_key="spend_cap",
+        icon="mdi:currency-gbp",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement="GBP",
         suggested_display_precision=2,
-        value_fn=_bill_amount,
+        value_fn=_spend_cap,
     ),
     O2SensorDescription(
-        key="latest_bill_date",
-        translation_key="latest_bill_date",
-        icon="mdi:receipt",
-        device_class=SensorDeviceClass.TIMESTAMP,
-        value_fn=_bill_date,
+        key="monthly_charge",
+        translation_key="monthly_charge",
+        icon="mdi:cash-multiple",
+        device_class=SensorDeviceClass.MONETARY,
+        native_unit_of_measurement="GBP",
+        suggested_display_precision=2,
+        value_fn=_monthly_charge,
     ),
 )
 
@@ -209,21 +194,18 @@ class O2Sensor(CoordinatorEntity[O2Coordinator], SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        msisdn = coordinator.data.msisdn if coordinator.data else None
+        product_type = coordinator.data.product_type if coordinator.data else None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=DEFAULT_NAME,
             manufacturer="O2",
-            model=coordinator.data.plan_subcategory if coordinator.data else None,
-            serial_number=coordinator.data.msisdn if coordinator.data else None,
+            model=product_type,
+            serial_number=msisdn,
         )
 
     @property
     def native_value(self) -> Any:
         if self.coordinator.data is None:
             return None
-        value = self.entity_description.value_fn(self.coordinator.data)
-        if self.entity_description.device_class == SensorDeviceClass.MONETARY and value is not None:
-            self._attr_native_unit_of_measurement = (
-                self.coordinator.data.latest_bill_currency or "GBP"
-            )
-        return value
+        return self.entity_description.value_fn(self.coordinator.data)

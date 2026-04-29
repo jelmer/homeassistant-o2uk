@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -37,8 +39,9 @@ USER_SCHEMA = vol.Schema(
 
 async def _validate(hass, username: str, password: str) -> None:
     session = async_get_clientsession(hass)
-    client = O2ApiClient(session, username, password)
-    await client.async_login()
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=True) as tmp:
+        client = O2ApiClient(session, username, password, Path(tmp.name))
+        await client.async_login()
 
 
 class O2UKConfigFlow(ConfigFlow, domain=DOMAIN):

@@ -7,6 +7,6 @@
   "documentation": "https://github.com/jelmer/homeassistant-o2uk",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/jelmer/homeassistant-o2uk/issues",
-  "requirements": ["playwright>=1.45"],
-  "version": "0.2.0"
+  "requirements": [],
+  "version": "0.3.0"
 }

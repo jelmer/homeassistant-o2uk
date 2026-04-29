@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-import tempfile
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -15,11 +13,11 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import O2ApiClient, O2ApiError, O2AuthError
+from .api import O2ApiClient, O2ApiError, O2AuthError, parse_cookie_string
 from .const import (
+    CONF_COOKIES,
     CONF_SCAN_INTERVAL_MINUTES,
     CONFIG_VERSION,
     DEFAULT_SCAN_INTERVAL_MINUTES,
@@ -29,19 +27,19 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-USER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_USERNAME): str,
-        vol.Required(CONF_PASSWORD): str,
-    }
-)
+USER_SCHEMA = vol.Schema({vol.Required(CONF_COOKIES): str})
 
 
-async def _validate(hass, username: str, password: str) -> None:
+async def _validate_cookies(hass, raw_cookies: str) -> dict[str, str]:
+    cookies = parse_cookie_string(raw_cookies)
+    if not cookies:
+        raise O2AuthError("No cookies parsed from input")
+
     session = async_get_clientsession(hass)
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=True) as tmp:
-        client = O2ApiClient(session, username, password, Path(tmp.name))
-        await client.async_login()
+    client = O2ApiClient(session, cookies)
+    # Will raise O2AuthError if the dashboard redirects to sign-in.
+    await client.async_get_dashboard_html()
+    return cookies
 
 
 class O2UKConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -53,25 +51,23 @@ class O2UKConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            username = user_input[CONF_USERNAME]
-            password = user_input[CONF_PASSWORD]
-
-            await self.async_set_unique_id(username.lower())
-            self._abort_if_unique_id_configured()
-
             try:
-                await _validate(self.hass, username, password)
+                cookies = await _validate_cookies(self.hass, user_input[CONF_COOKIES])
             except O2AuthError:
-                errors["base"] = "invalid_auth"
+                errors["base"] = "invalid_cookies"
             except O2ApiError:
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
-                _LOGGER.exception("Unexpected error during O2 UK auth")
+                _LOGGER.exception("Unexpected error validating O2 UK cookies")
                 errors["base"] = "unknown"
             else:
+                # Use a stable identifier from the cookies if we can find
+                # one; otherwise just allow a single entry per HA instance.
+                await self.async_set_unique_id(DOMAIN)
+                self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=username,
-                    data={CONF_USERNAME: username, CONF_PASSWORD: password},
+                    title="O2 UK",
+                    data={CONF_COOKIES: cookies},
                 )
 
         return self.async_show_form(step_id="user", data_schema=USER_SCHEMA, errors=errors)
@@ -86,28 +82,23 @@ class O2UKConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reauth_entry()
 
         if user_input is not None:
-            username = entry.data[CONF_USERNAME]
-            password = user_input[CONF_PASSWORD]
             try:
-                await _validate(self.hass, username, password)
+                cookies = await _validate_cookies(self.hass, user_input[CONF_COOKIES])
             except O2AuthError:
-                errors["base"] = "invalid_auth"
+                errors["base"] = "invalid_cookies"
             except O2ApiError:
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
-                _LOGGER.exception("Unexpected error during O2 UK reauth")
+                _LOGGER.exception("Unexpected error validating O2 UK cookies")
                 errors["base"] = "unknown"
             else:
                 return self.async_update_reload_and_abort(
                     entry,
-                    data={**entry.data, CONF_PASSWORD: password},
+                    data={**entry.data, CONF_COOKIES: cookies},
                 )
 
         return self.async_show_form(
-            step_id="reauth_confirm",
-            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
-            description_placeholders={"username": entry.data[CONF_USERNAME]},
-            errors=errors,
+            step_id="reauth_confirm", data_schema=USER_SCHEMA, errors=errors
         )
 
     @staticmethod
@@ -116,24 +107,41 @@ class O2UKConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class O2UKOptionsFlow(OptionsFlow):
-    """Options flow – currently just the poll interval."""
+    """Options flow: poll interval, plus a way to refresh cookies."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            new_data = dict(self._entry.data)
+            raw_cookies = user_input.get(CONF_COOKIES, "").strip()
+            if raw_cookies:
+                try:
+                    new_data[CONF_COOKIES] = await _validate_cookies(self.hass, raw_cookies)
+                except O2AuthError:
+                    errors["base"] = "invalid_cookies"
+                except O2ApiError:
+                    errors["base"] = "cannot_connect"
 
-        current = self._entry.options.get(CONF_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES)
+            if not errors:
+                self.hass.config_entries.async_update_entry(self._entry, data=new_data)
+                return self.async_create_entry(
+                    title="",
+                    data={CONF_SCAN_INTERVAL_MINUTES: user_input[CONF_SCAN_INTERVAL_MINUTES]},
+                )
 
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_SCAN_INTERVAL_MINUTES, default=current): vol.All(
-                        int, vol.Range(min=MIN_SCAN_INTERVAL_MINUTES)
-                    ),
-                }
-            ),
+        current_interval = self._entry.options.get(
+            CONF_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES
         )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SCAN_INTERVAL_MINUTES, default=current_interval): vol.All(
+                    int, vol.Range(min=MIN_SCAN_INTERVAL_MINUTES)
+                ),
+                vol.Optional(CONF_COOKIES): str,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

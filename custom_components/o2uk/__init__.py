@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import O2ApiClient, O2ApiError, O2AuthError
-from .const import CONFIG_VERSION, DOMAIN, STORAGE_FILENAME
+from .const import CONF_COOKIES, CONFIG_VERSION, DOMAIN
 from .coordinator import O2Coordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,15 +22,16 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up O2 UK from a config entry."""
     session = async_get_clientsession(hass)
-    storage_path = Path(hass.config.path("o2uk", f"{entry.entry_id}_{STORAGE_FILENAME}"))
-    client = O2ApiClient(
-        session,
-        entry.data[CONF_USERNAME],
-        entry.data[CONF_PASSWORD],
-        storage_path,
-    )
+    cookies = entry.data.get(CONF_COOKIES) or {}
+    if isinstance(cookies, str):
+        # Migrate older entries that stored the raw string.
+        from .api import parse_cookie_string
 
+        cookies = parse_cookie_string(cookies)
+
+    client = O2ApiClient(session, cookies)
     coordinator = O2Coordinator(hass, entry, client)
+
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryAuthFailed:
@@ -50,7 +50,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok

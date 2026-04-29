@@ -2,37 +2,44 @@
   "config": {
     "step": {
       "user": {
-        "description": "Sign in with your My O2 (UK) credentials.",
+        "title": "Paste your My O2 cookies",
+        "description": "Open https://www.o2.co.uk/ecare/home in your browser, sign in, then open DevTools → Network → click the request to ecare/home → Headers → copy the value of the `Cookie:` request header. Paste it below.",
         "data": {
-          "username": "Email or username",
-          "password": "Password"
+          "cookies": "Cookie header"
         }
       },
       "reauth_confirm": {
-        "description": "Re-enter the password for {username}.",
+        "title": "O2 session expired",
+        "description": "Your O2 session has expired. Sign in to https://www.o2.co.uk/ecare/home again, copy the `Cookie` header from DevTools, and paste it below.",
         "data": {
-          "password": "Password"
+          "cookies": "Cookie header"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid credentials.",
-      "cannot_connect": "Could not reach the My O2 portal.",
+      "invalid_cookies": "Couldn't reach the dashboard with these cookies. Sign in again and copy a fresh `Cookie` header.",
+      "cannot_connect": "Network error reaching O2.",
       "unknown": "Unexpected error."
     },
     "abort": {
-      "already_configured": "This O2 account is already configured.",
-      "reauth_successful": "Re-authentication successful."
+      "already_configured": "O2 UK is already configured.",
+      "reauth_successful": "Cookies refreshed successfully."
     }
   },
   "options": {
     "step": {
       "init": {
-        "description": "Adjust the polling interval.",
+        "title": "O2 UK options",
+        "description": "Adjust the polling interval, or paste fresh cookies to refresh the session.",
         "data": {
-          "scan_interval_minutes": "Polling interval (minutes)"
+          "scan_interval_minutes": "Polling interval (minutes)",
+          "cookies": "New Cookie header (leave blank to keep the current one)"
         }
       }
+    },
+    "error": {
+      "invalid_cookies": "Couldn't reach the dashboard with the new cookies.",
+      "cannot_connect": "Network error reaching O2."
     }
   },
   "entity": {
@@ -45,8 +52,8 @@
       "texts_remaining": { "name": "Texts remaining" },
       "texts_used": { "name": "Texts used" },
       "allowance_reset": { "name": "Allowance reset" },
-      "latest_bill_amount": { "name": "Latest bill amount" },
-      "latest_bill_date": { "name": "Latest bill date" }
+      "spend_cap": { "name": "Spend cap" },
+      "monthly_charge": { "name": "Monthly charge" }
     }
   }
 }

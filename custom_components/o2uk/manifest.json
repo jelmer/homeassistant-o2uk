@@ -1,0 +1,12 @@
+{
+  "domain": "o2uk",
+  "name": "O2 (UK)",
+  "codeowners": ["@jelmer"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/jelmer/homeassistant-o2uk",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/jelmer/homeassistant-o2uk/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

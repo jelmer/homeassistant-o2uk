@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "homeassistant-o2uk"
+version = "0.1.0"
+description = "Home Assistant integration for the O2 (UK) self-service portal."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Jelmer Vernooĳ", email = "jelmer@jelmer.uk" }]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-aiohttp>=1.0",
+  "ruff>=0.5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]

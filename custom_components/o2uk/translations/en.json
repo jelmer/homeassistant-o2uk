@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Sign in with your My O2 (UK) credentials.",
+        "data": {
+          "username": "Email or username",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "description": "Re-enter the password for {username}.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials.",
+      "cannot_connect": "Could not reach the My O2 portal.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This O2 account is already configured.",
+      "reauth_successful": "Re-authentication successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "Adjust the polling interval.",
+        "data": {
+          "scan_interval_minutes": "Polling interval (minutes)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "data_remaining": { "name": "Data remaining" },
+      "data_used": { "name": "Data used" },
+      "data_allowance": { "name": "Data allowance" },
+      "minutes_remaining": { "name": "Minutes remaining" },
+      "minutes_used": { "name": "Minutes used" },
+      "texts_remaining": { "name": "Texts remaining" },
+      "texts_used": { "name": "Texts used" },
+      "allowance_reset": { "name": "Allowance reset" },
+      "latest_bill_amount": { "name": "Latest bill amount" },
+      "latest_bill_date": { "name": "Latest bill date" }
+    }
+  }
+}
